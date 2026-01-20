@@ -62,7 +62,7 @@ client.on('messageCreate', async (message) => {
       max_completion_tokens: 500,
     });
 
-    const reply = response.choices[0].message.content;
+    const reply = response.choices[0].message.content || '(No response)';
 
     // Discord has a 2000 char limit
     if (reply.length > 2000) {

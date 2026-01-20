@@ -8,16 +8,11 @@ primary_region = 'iad'
 
 [build]
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
+# No HTTP service - this is a worker process
+[processes]
+  app = "node bot.js"
 
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
-  cpus = 1
-  memory_mb = 256
+  size = 'shared-cpu-1x'
+  memory = '256mb'
+  auto_stop_machines = false
