@@ -17,9 +17,16 @@ client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
+const ALLOWED_SERVERS = new Set([
+  '1462907431888617494',
+]);
+
 client.on('messageCreate', async (message) => {
   // Ignore bot messages
   if (message.author.bot) return;
+
+  // Only respond in allowed servers
+  if (!ALLOWED_SERVERS.has(message.guild?.id)) return;
 
   // Respond when mentioned or when message starts with !ask
   const isMentioned = message.mentions.has(client.user);
