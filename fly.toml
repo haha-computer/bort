@@ -1,4 +1,9 @@
-app = 'bort-discord-bot'
+# fly.toml app configuration file generated for bort on 2026-01-20T01:55:00Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'bort'
 primary_region = 'iad'
 
 [build]
@@ -6,10 +11,13 @@ primary_region = 'iad'
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
+  processes = ['app']
 
 [[vm]]
-  size = 'shared-cpu-1x'
-  memory = '256mb'
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 256
