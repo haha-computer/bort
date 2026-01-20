@@ -5,6 +5,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
   ],
 });
@@ -25,8 +26,14 @@ client.on('messageCreate', async (message) => {
   // Ignore bot messages
   if (message.author.bot) return;
 
+  // Redirect DMs back to the group chat
+  if (!message.guild) {
+    await message.reply("I'm more of a public spectacle. Find me back in the server!");
+    return;
+  }
+
   // Only respond in allowed servers
-  if (!ALLOWED_SERVERS.has(message.guild?.id)) return;
+  if (!ALLOWED_SERVERS.has(message.guild.id)) return;
 
   // Respond when mentioned or when message starts with !ask
   const isMentioned = message.mentions.has(client.user);
