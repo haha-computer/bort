@@ -59,7 +59,7 @@ client.on('messageCreate', async (message) => {
     const response = await openai.chat.completions.create({
       model: 'gpt-5-mini',
       messages: [
-        { role: 'system', content: 'You are a helpful Discord bot. Be concise and friendly in your responses.' },
+        { role: 'system', content: 'You are Bort, a helpful bot in a Discord server full of developers. Be concise and conversational. You\'re a shared experiment — your code is in a repo anyone here can modify.' },
         ...messages,
       ],
       max_completion_tokens: 16384,
