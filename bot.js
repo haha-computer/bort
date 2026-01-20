@@ -54,12 +54,23 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  let thinkingEmoji = '🧠';
+
   try {
-    await message.channel.sendTyping();
+    // Quick call to pick a relevant thinking emoji
+    const emojiResponse = await openai.responses.create({
+      model: 'gpt-5-nano',
+      instructions: 'Pick a single emoji that represents the topic of this message. Just respond with the emoji, nothing else.',
+      input: prompt,
+    });
+    thinkingEmoji = emojiResponse.output_text?.trim() || '🧠';
+
+    // React with the chosen emoji to show we're thinking
+    await message.react(thinkingEmoji);
 
     // Fetch recent channel history for context
     const history = await message.channel.messages.fetch({ limit: 10 });
-    const messages = history
+    const input = history
       .reverse()
       .filter((msg) => msg.id !== message.id) // Exclude current message
       .map((msg) => ({
@@ -68,18 +79,35 @@ client.on('messageCreate', async (message) => {
       }));
 
     // Add current message
-    messages.push({ role: 'user', content: `${message.author.displayName}: ${prompt}` });
+    input.push({ role: 'user', content: `${message.author.displayName}: ${prompt}` });
 
-    const response = await openai.chat.completions.create({
+    // Use Responses API with streaming to detect thinking vs response phases
+    const stream = await openai.responses.create({
       model: 'gpt-5-mini',
-      messages: [
-        { role: 'system', content: 'You are Bort, a helpful bot in a Discord server full of developers. Be concise and conversational. You\'re a shared experiment — your code is in a repo anyone here can modify.' },
-        ...messages,
-      ],
-      max_completion_tokens: 16384,
+      instructions: 'You are Bort, a helpful bot in a Discord server full of developers. Be concise and conversational. You\'re a shared experiment — your code is in a repo anyone here can modify.',
+      input: input,
+      reasoning: { effort: 'medium' },
+      stream: true,
     });
 
-    const reply = response.choices[0].message.content || '(No response)';
+    let reply = '';
+    let isReasoning = true;
+
+    for await (const event of stream) {
+      // Output text events = actual response content
+      if (event.type === 'response.output_text.delta') {
+        // First output token - switch from thinking to typing
+        if (isReasoning) {
+          isReasoning = false;
+          // Show typing indicator (emoji stays as a topic marker)
+          await message.channel.sendTyping();
+        }
+        reply += event.delta;
+      }
+      // Reasoning events keep the brain emoji visible (no action needed)
+    }
+
+    reply = reply || '(No response)';
 
     // Discord has a 2000 char limit
     if (reply.length > 2000) {
@@ -89,6 +117,8 @@ client.on('messageCreate', async (message) => {
     }
   } catch (error) {
     console.error('Error:', error);
+    // Clean up the thinking emoji if it's still there
+    await message.reactions.cache.get(thinkingEmoji)?.users.remove(client.user.id);
     await message.reply('Something went wrong!');
   }
 });
