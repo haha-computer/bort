@@ -57,9 +57,12 @@ client.on('messageCreate', async (message) => {
     messages.push({ role: 'user', content: `${message.author.displayName}: ${prompt}` });
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-5-mini', // Using your free tier model
-      messages,
-      max_completion_tokens: 500,
+      model: 'gpt-5-mini',
+      messages: [
+        { role: 'system', content: 'You are a helpful Discord bot. Be concise and friendly in your responses.' },
+        ...messages,
+      ],
+      max_completion_tokens: 16384,
     });
 
     const reply = response.choices[0].message.content || '(No response)';
