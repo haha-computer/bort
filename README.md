@@ -54,6 +54,5 @@ This is a shared experiment. Fork it, break it, make it weird. Some ideas:
 - Add new commands beyond `!ask`
 - Add tool use / function calling
 - Make Bort remember things
-- Give Bort a personality disorder
 
 Push to `master` and it deploys. If you break it, you fix it (or ask for help).
