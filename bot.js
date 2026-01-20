@@ -14,6 +14,57 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const GITHUB_ORG = 'haha-computer';
+
+// Tool definitions for function calling
+const tools = [
+  {
+    type: 'function',
+    name: 'get_repo_info',
+    description: 'Get information about a GitHub repository in our organization',
+    parameters: {
+      type: 'object',
+      properties: {
+        repo_name: {
+          type: 'string',
+          description: 'The name of the repository (e.g., "bort")',
+        },
+      },
+      required: ['repo_name'],
+    },
+  },
+];
+
+// Execute a tool call
+async function executeTool(name, args) {
+  if (name === 'get_repo_info') {
+    const { repo_name } = args;
+    const headers = { 'User-Agent': 'Bort-Discord-Bot' };
+    if (process.env.GITHUB_TOKEN) {
+      headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_ORG}/${repo_name}`, { headers });
+    if (!res.ok) {
+      return { error: `Repository "${repo_name}" not found in ${GITHUB_ORG}` };
+    }
+
+    const repo = await res.json();
+    return {
+      name: repo.name,
+      description: repo.description || 'No description',
+      stars: repo.stargazers_count,
+      forks: repo.forks_count,
+      open_issues: repo.open_issues_count,
+      language: repo.language,
+      default_branch: repo.default_branch,
+      updated_at: repo.updated_at,
+      html_url: repo.html_url,
+    };
+  }
+  return { error: 'Unknown tool' };
+}
+
 client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
@@ -57,13 +108,18 @@ client.on('messageCreate', async (message) => {
   let thinkingEmoji = '🧠';
 
   try {
-    // Quick call to pick a relevant thinking emoji
+    const timings = {};
+    const start = Date.now();
+
+    // Quick call to pick a relevant thinking emoji (minimal reasoning for speed)
     const emojiResponse = await openai.responses.create({
       model: 'gpt-5-nano',
       instructions: 'Pick a single emoji that represents the topic of this message. Just respond with the emoji, nothing else.',
       input: prompt,
+      reasoning: { effort: 'low' },
     });
     thinkingEmoji = emojiResponse.output_text?.trim() || '🧠';
+    timings.emoji = Date.now() - start;
 
     // React with the chosen emoji to show we're thinking
     await message.react(thinkingEmoji);
@@ -81,33 +137,59 @@ client.on('messageCreate', async (message) => {
     // Add current message
     input.push({ role: 'user', content: `${message.author.displayName}: ${prompt}` });
 
-    // Use Responses API with streaming to detect thinking vs response phases
-    const stream = await openai.responses.create({
+    // Use Responses API with function calling
+    const instructions = 'You are Bort, a helpful bot in a Discord server full of developers. Be concise and conversational. You\'re a shared experiment — your code is in a repo anyone here can modify.';
+
+    let llmStart = Date.now();
+    let response = await openai.responses.create({
       model: 'gpt-5-mini',
-      instructions: 'You are Bort, a helpful bot in a Discord server full of developers. Be concise and conversational. You\'re a shared experiment — your code is in a repo anyone here can modify.',
-      input: input,
+      instructions,
+      input,
+      tools,
       reasoning: { effort: 'medium' },
-      stream: true,
+      text: { verbosity: 'low' },
     });
+    timings.firstLLM = Date.now() - llmStart;
 
-    let reply = '';
-    let isReasoning = true;
+    // Handle function calls (may need multiple rounds)
+    let toolRound = 0;
+    while (response.output.some((item) => item.type === 'function_call')) {
+      toolRound++;
+      const toolResults = [];
 
-    for await (const event of stream) {
-      // Output text events = actual response content
-      if (event.type === 'response.output_text.delta') {
-        // First output token - switch from thinking to typing
-        if (isReasoning) {
-          isReasoning = false;
-          // Show typing indicator (emoji stays as a topic marker)
-          await message.channel.sendTyping();
+      for (const item of response.output) {
+        if (item.type === 'function_call') {
+          const toolStart = Date.now();
+          const result = await executeTool(item.name, JSON.parse(item.arguments));
+          timings[`tool_${toolRound}_${item.name}`] = Date.now() - toolStart;
+          toolResults.push({
+            type: 'function_call_output',
+            call_id: item.call_id,
+            output: JSON.stringify(result),
+          });
         }
-        reply += event.delta;
       }
-      // Reasoning events keep the brain emoji visible (no action needed)
+
+      // Continue conversation with tool results (lower reasoning since we have the data)
+      llmStart = Date.now();
+      response = await openai.responses.create({
+        model: 'gpt-5-mini',
+        instructions,
+        input: [...input, ...response.output, ...toolResults],
+        tools,
+        reasoning: { effort: 'low' },
+        text: { verbosity: 'low' },
+      });
+      timings[`llm_round_${toolRound}`] = Date.now() - llmStart;
     }
 
-    reply = reply || '(No response)';
+    timings.total = Date.now() - start;
+    console.log('Timings (ms):', timings);
+
+    // Show typing indicator before sending reply
+    await message.channel.sendTyping();
+
+    const reply = response.output_text || '(No response)';
 
     // Discord has a 2000 char limit
     if (reply.length > 2000) {
