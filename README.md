@@ -1,6 +1,6 @@
 # Bort
 
-A Discord bot powered by OpenAI's Responses API. Responds when @mentioned and maintains per-channel conversation context.
+A Discord bot powered by OpenAI's Responses API. Responds when @mentioned, maintains per-channel conversation context, and uses AI-driven tool calls to fetch Discord context only when needed.
 
 ## Setup
 

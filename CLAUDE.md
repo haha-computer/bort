@@ -18,8 +18,12 @@ src/
     client.js               # Discord.js client factory (intents, partials)
     messages.js             # messageCreate handler — mention filtering, typing, reply splitting
   ai/
-    openai-client.js        # Single function: getResponse(channelId, userMessage)
+    openai-client.js        # getResponse() with tool loop support
     conversation.js         # In-memory Map<channelId, responseId> for multi-turn chaining
+  tools/
+    definitions.js          # Tool schemas (get_channel_history, get_reply_chain)
+    executors.js            # createToolExecutors(message) — Discord-bound tool implementations
+    index.js                # Barrel export
   util/
     logger.js               # Console wrapper with timestamps and LOG_LEVEL support
 ```
@@ -45,14 +49,20 @@ This is critical — the bot uses the **Responses API**, which differs from Chat
 
 Per-channel `previous_response_id` stored in memory. Restarting the bot loses chain context (by design — keeps things simple). If the API returns 400 for a stale chain, it auto-clears and retries once.
 
-## Adding tools
+## Tools
 
-The extension point is `src/ai/openai-client.js`. Future tools go in a `src/tools/` directory. The Responses API tool loop pattern:
+The AI decides when to fetch Discord context via tool calls — no pre-fetching. Built-in tools:
 
-1. Add tool definitions to the `params.tools` array
-2. Check `response.output` for items with `type: "function_call"`
-3. Execute the tool, then call `client.responses.create()` again with the tool result and `previous_response_id`
-4. Loop until no more tool calls
+- **`get_channel_history`** — fetches recent channel messages (1-30, default 15)
+- **`get_reply_chain`** — walks the reply chain backwards (1-10, default 5)
+
+Tool definitions live in `src/tools/definitions.js`, implementations in `src/tools/executors.js`. The `openai-client.js` tool loop is generic — it accepts any tool definitions and executor map.
+
+### Adding new tools
+
+1. Add the definition to `src/tools/definitions.js` (flat schema: `{type, name, description, parameters}`)
+2. Add the executor to `src/tools/executors.js` inside `createToolExecutors()`
+3. That's it — `openai-client.js` handles the loop automatically (max 5 iterations)
 
 ## Conventions
 

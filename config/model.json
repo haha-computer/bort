@@ -1,9 +1,6 @@
 {
   "model": "gpt-5-nano-2025-08-07",
   "store": true,
-  "reasoning": {
-    "effort": "minimal"
-  },
   "text": {
     "format": {
       "type": "text"
