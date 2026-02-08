@@ -1,0 +1,11 @@
+app = 'bort'
+primary_region = 'ord'
+
+[build]
+
+[processes]
+  app = 'node src/index.js'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'
