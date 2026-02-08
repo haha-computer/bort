@@ -41,13 +41,13 @@ This is critical — the bot uses the **Responses API**, which differs from Chat
 
 ## Configuration
 
-- `config/model.json` — Model params spread directly into the API request. Change model, reasoning effort, etc. here.
+- `config/model.json` — Model params (spread into the API request) plus bot settings under `bort`.
 - `prompts/system.txt` — Plain text developer prompt loaded once at startup.
 - `.env` — `DISCORD_TOKEN`, `OPENAI_API_KEY` (never commit this)
 
 ## Conversation tracking
 
-Per-channel `previous_response_id` stored in memory. Restarting the bot loses chain context (by design — keeps things simple). If the API returns 400 for a stale chain, it auto-clears and retries once.
+Per-channel `previous_response_id` stored in memory with TTL + max size from `config/model.json`. Restarting the bot loses chain context (by design — keeps things simple). If the API returns 400 for a stale chain, it auto-clears and retries once.
 
 ## Tools
 

@@ -20,7 +20,9 @@ A Discord bot powered by OpenAI's Responses API. Responds when @mentioned, maint
 
 ## Configuration
 
-- **`config/model.json`** — Model and API parameters (reasoning effort, verbosity, etc.)
+- **`config/model.json`** — Model/API parameters plus bot settings under `bort`:
+  - `bort.chain_ttl_minutes` — Inactivity window before a channel's conversation chain expires (default: 60).
+  - `bort.max_channel_chains` — Max number of channel chains kept in memory (default: 1000).
 - **`prompts/system.txt`** — The bot's personality/system prompt
 
-Changes to these files take effect on restart (`node --watch` handles this automatically during dev).
+Changes to these files take effect on restart. The `npm run dev` script watches `src/`, `config/`, and `prompts/`. If your Node version doesn't support `--watch-path`, restart manually.

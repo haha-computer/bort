@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch --watch-path=src --watch-path=config --watch-path=prompts src/index.js"
   },
   "dependencies": {
     "discord.js": "^14.19.3",

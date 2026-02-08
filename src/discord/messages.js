@@ -4,6 +4,26 @@ import { logger } from '../util/logger.js';
 
 const MAX_LENGTH = 2000;
 const recentlyProcessed = new Set();
+const channelQueues = new Map();
+
+function enqueueChannelTask(channelId, task) {
+  const previous = channelQueues.get(channelId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(task)
+    .catch((err) => {
+      logger.error('Channel task failed:', err);
+    });
+  channelQueues.set(
+    channelId,
+    next.finally(() => {
+      if (channelQueues.get(channelId) === next) {
+        channelQueues.delete(channelId);
+      }
+    })
+  );
+  return next;
+}
 
 /**
  * Split text into chunks that fit within Discord's message limit,
@@ -66,10 +86,54 @@ function resolveMentions(content, message) {
  */
 function insertMentions(content, nameToId) {
   if (nameToId.size === 0) return content;
-  let result = content;
-  for (const [name, id] of nameToId) {
-    result = result.replaceAll(`@${name}`, `<@${id}>`);
+  return replaceMentionsOutsideCode(content, nameToId);
+}
+
+function replaceMentionsOutsideCode(content, nameToId) {
+  if (!content.includes('`')) {
+    let result = content;
+    for (const [name, id] of nameToId) {
+      result = result.replaceAll(`@${name}`, `<@${id}>`);
+    }
+    return result;
   }
+
+  let result = '';
+  let i = 0;
+  let inBlock = false;
+  let inInline = false;
+
+  while (i < content.length) {
+    if (!inInline && content.startsWith('```', i)) {
+      inBlock = !inBlock;
+      result += '```';
+      i += 3;
+      continue;
+    }
+
+    if (!inBlock && content[i] === '`') {
+      inInline = !inInline;
+      result += '`';
+      i += 1;
+      continue;
+    }
+
+    if (inBlock || inInline) {
+      result += content[i];
+      i += 1;
+      continue;
+    }
+
+    let next = content.indexOf('`', i);
+    if (next === -1) next = content.length;
+    let segment = content.slice(i, next);
+    for (const [name, id] of nameToId) {
+      segment = segment.replaceAll(`@${name}`, `<@${id}>`);
+    }
+    result += segment;
+    i = next;
+  }
+
   return result;
 }
 
@@ -80,51 +144,75 @@ export function registerMessageHandler(client) {
   client.on('messageCreate', async (message) => {
     // Ignore bots and messages that don't mention us
     if (message.author.bot) return;
-    if (!message.mentions.has(client.user)) return;
-    if (recentlyProcessed.has(message.id)) return;
-    recentlyProcessed.add(message.id);
-    setTimeout(() => recentlyProcessed.delete(message.id), 5000);
+    if (!message.partial && !message.mentions.has(client.user)) return;
 
-    const { text: userText, nameToId } = resolveMentions(message.content, message);
-    if (!userText) return;
-
-    logger.info(`[${message.guild?.name ?? 'DM'}#${message.channel.name ?? 'unknown'}] ${message.author.tag}: ${userText}`);
-
-    try {
-      await message.channel.sendTyping();
-
-      // Add the message author to the mention map so the AI can @mention them
-      const authorName = message.member?.displayName ?? message.author.username;
-      nameToId.set(authorName, message.author.id);
-
-      // Build input — just the user's message, with a reply hint if applicable
-      let input = `${authorName}: ${userText}`;
-      if (message.reference) {
-        input += '\n(This message is a reply to an earlier message.)';
+    enqueueChannelTask(message.channelId, async () => {
+      let workingMessage = message;
+      if (workingMessage.partial) {
+        try {
+          workingMessage = await workingMessage.fetch();
+        } catch (err) {
+          logger.warn('Failed to fetch partial message:', err);
+          return;
+        }
       }
 
-      // Create tool executors bound to this message
-      const { executors, getDiscoveredMentions } = createToolExecutors(message);
+      if (!workingMessage.mentions.has(client.user)) return;
+      if (recentlyProcessed.has(workingMessage.id)) return;
+      recentlyProcessed.add(workingMessage.id);
+      setTimeout(() => recentlyProcessed.delete(workingMessage.id), 5000);
 
-      const reply = await getResponse(message.channelId, input, {
-        tools: toolDefinitions,
-        toolExecutors: executors,
-      });
+      const { text: userText, nameToId } = resolveMentions(workingMessage.content ?? '', workingMessage);
+      if (!userText) return;
 
-      // Merge mentions discovered via tool calls
-      const discovered = getDiscoveredMentions();
-      for (const [name, id] of discovered) {
-        if (!nameToId.has(name)) nameToId.set(name, id);
+      logger.info(`[${workingMessage.guild?.name ?? 'DM'}#${workingMessage.channel.name ?? 'unknown'}] ${workingMessage.author.tag}: ${userText}`);
+
+      try {
+        await workingMessage.channel.sendTyping();
+
+        // Add the message author to the mention map so the AI can @mention them
+        const authorName = workingMessage.member?.displayName ?? workingMessage.author.username;
+        nameToId.set(authorName, workingMessage.author.id);
+
+        // Build input — just the user's message, with a reply hint if applicable
+        let input = `${authorName}: ${userText}`;
+        if (workingMessage.reference) {
+          input += '\n(This message is a reply to an earlier message.)';
+        }
+
+        // Create tool executors bound to this message
+        const { executors, getDiscoveredMentions } = createToolExecutors(workingMessage);
+
+        const reply = await getResponse(workingMessage.channelId, input, {
+          tools: toolDefinitions,
+          toolExecutors: executors,
+        });
+
+        // Merge mentions discovered via tool calls
+        const discovered = getDiscoveredMentions();
+        for (const [name, id] of discovered) {
+          if (!nameToId.has(name)) nameToId.set(name, id);
+        }
+
+        const finalReply = insertMentions(reply, nameToId);
+        const chunks = splitMessage(finalReply);
+        const allowedMentions = { users: [...nameToId.values()], repliedUser: false };
+
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          if (i === 0) {
+            await workingMessage.reply({ content: chunk, allowedMentions });
+          } else {
+            await workingMessage.channel.send({ content: chunk, allowedMentions });
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to respond:', err);
+        await workingMessage.reply({
+          content: 'Something went wrong. Try again later.',
+          allowedMentions: { parse: [], repliedUser: false },
+        }).catch(() => {});
       }
-
-      const finalReply = insertMentions(reply, nameToId);
-      const chunks = splitMessage(finalReply);
-      for (const chunk of chunks) {
-        await message.reply({ content: chunk, allowedMentions: { users: [...nameToId.values()] } });
-      }
-    } catch (err) {
-      logger.error('Failed to respond:', err);
-      await message.reply({ content: 'Something went wrong. Try again later.', allowedMentions: { parse: [] } }).catch(() => {});
-    }
+    });
   });
 }
